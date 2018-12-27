@@ -2,12 +2,11 @@ package main
 
 import (
 	"flag"
+	"log"
 	"os"
 	"os/exec"
 	"strings"
 	"sync"
-
-	"github.com/labstack/gommon/log"
 )
 
 func main() {
@@ -17,7 +16,7 @@ func main() {
 	cmd := exec.Command("ghq", "list", "-p")
 	out, err := cmd.Output()
 	if err != nil {
-		log.Error(err)
+		log.Fatal(err)
 		os.Exit(1)
 	}
 	repos := strings.Split(string(out), "\n")
