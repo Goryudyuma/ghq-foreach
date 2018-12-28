@@ -63,9 +63,12 @@ func commandProcess(swg *sync.WaitGroup, repo string, cmdString []string, output
 	cmd := exec.Command("git", cmdString...)
 	cmd.Dir = repo
 	result, err := cmd.CombinedOutput()
+
+	resultString := repo + "\n" + string(result)
+
 	if err != nil {
-		errors <- repo + "\n" + err.Error()
+		errors <- resultString
 	} else {
-		output <- repo + "\n" + string(result)
+		output <- resultString
 	}
 }
