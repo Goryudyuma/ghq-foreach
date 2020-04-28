@@ -9,9 +9,34 @@ import (
 	"sync"
 )
 
+type Result interface {
+	getResult() string
+}
+
+type Success struct {
+	result string
+}
+
+func (s Success) getResult() string {
+	return s.result
+}
+
+type Fail struct {
+	result string
+	err    error
+}
+
+func (f Fail) getResult() string {
+	return f.result
+}
+func (f Fail) getError() string {
+	return f.err.Error()
+}
+
 func main() {
+	parallelNumber := flag.Int("n", 1, "parallel number")
 	flag.Parse()
-	flags := flag.Args()
+	commands := flag.Args()
 
 	cmd := exec.Command("ghq", "list", "-p")
 	out, err := cmd.Output()
@@ -21,54 +46,79 @@ func main() {
 	}
 	repos := strings.Split(string(out), "\n")
 
+	input := make(chan string)
+	output := make(chan Result)
+
 	swg := &sync.WaitGroup{}
-	swg.Add(len(repos))
+	swg.Add(*parallelNumber)
 
-	output := make(chan string)
-	errors := make(chan string)
-
-	for _, repo := range repos {
-		go commandProcess(swg, repo, flags, output, errors)
+	for i := 0; i < *parallelNumber; i++ {
+		go process(swg, commands, input, output)
 	}
 
-	count := len(repos)
-	errorMessages := []string{}
+	swg.Add(1)
+	go func() {
+		defer swg.Done()
+		for _, repo := range repos {
+			input <- repo
+		}
+		close(input)
+	}()
+
+	go func() {
+		swg.Wait()
+		close(output)
+	}()
+
+	fails := make([]Fail, 0)
+
+exitLoop:
 	for {
 		select {
-		case result := <-output:
-			{
-				println(result)
-				count--
+		case result, ok := <-output:
+			if ok {
+				switch result.(type) {
+				case Success:
+					s := result.(Success)
+					println(s.getResult())
+				case Fail:
+					fails = append(fails, result.(Fail))
+				}
+			} else {
+				break exitLoop
 			}
-		case result := <-errors:
-			{
-				errorMessages = append(errorMessages, result)
-				count--
-			}
-		}
-		if count == 0 {
-			break
 		}
 	}
 
-	for _, v := range errorMessages {
-		println(v)
+	println("--------------------")
+
+	for _, f := range fails {
+		println(f.getResult())
+		println(f.getError())
 	}
-	swg.Wait()
 }
 
-func commandProcess(swg *sync.WaitGroup, repo string, cmdString []string, output chan<- string, errors chan<- string) {
+func process(swg *sync.WaitGroup, commands []string, input <-chan string, output chan<- Result) {
 	defer swg.Done()
 
-	cmd := exec.Command("git", cmdString...)
-	cmd.Dir = repo
-	result, err := cmd.CombinedOutput()
+	for {
+		select {
+		case repo, ok := <-input:
+			if ok {
+				cmd := exec.Command("git", commands...)
+				cmd.Dir = repo
+				result, err := cmd.CombinedOutput()
 
-	resultString := repo + "\n" + string(result)
+				resultString := repo + "\n" + string(result)
 
-	if err != nil {
-		errors <- resultString
-	} else {
-		output <- resultString
+				if err != nil {
+					output <- Fail{resultString, err}
+				} else {
+					output <- Success{resultString}
+				}
+			} else {
+				return
+			}
+		}
 	}
 }
